@@ -1,0 +1,22 @@
+{
+  "national": {
+    "stations": 7850,
+    "ports": 23400,
+    "level2Ports": 18600,
+    "dcfcPorts": 4800,
+    "evStock": 426000,
+    "evsPerCharger": 18.2
+  },
+  "provinces": [
+    { "name": "Quebec", "abbr": "QC", "stations": 2680, "ports": 8200, "level2Ports": 6800, "dcfcPorts": 1400, "evStock": 185000, "evsPerCharger": 22.6 },
+    { "name": "British Columbia", "abbr": "BC", "stations": 1720, "ports": 4900, "level2Ports": 3800, "dcfcPorts": 1100, "evStock": 112000, "evsPerCharger": 22.9 },
+    { "name": "Ontario", "abbr": "ON", "stations": 2100, "ports": 6200, "level2Ports": 5000, "dcfcPorts": 1200, "evStock": 88000, "evsPerCharger": 14.2 },
+    { "name": "Alberta", "abbr": "AB", "stations": 620, "ports": 1800, "level2Ports": 1400, "dcfcPorts": 400, "evStock": 24000, "evsPerCharger": 13.3 },
+    { "name": "Manitoba", "abbr": "MB", "stations": 180, "ports": 520, "level2Ports": 440, "dcfcPorts": 80, "evStock": 5200, "evsPerCharger": 10.0 },
+    { "name": "Saskatchewan", "abbr": "SK", "stations": 120, "ports": 350, "level2Ports": 290, "dcfcPorts": 60, "evStock": 3000, "evsPerCharger": 8.6 },
+    { "name": "Nova Scotia", "abbr": "NS", "stations": 140, "ports": 400, "level2Ports": 340, "dcfcPorts": 60, "evStock": 4200, "evsPerCharger": 10.5 },
+    { "name": "New Brunswick", "abbr": "NB", "stations": 95, "ports": 280, "level2Ports": 230, "dcfcPorts": 50, "evStock": 2400, "evsPerCharger": 8.6 },
+    { "name": "Newfoundland", "abbr": "NL", "stations": 65, "ports": 180, "level2Ports": 150, "dcfcPorts": 30, "evStock": 1200, "evsPerCharger": 6.7 },
+    { "name": "PEI", "abbr": "PE", "stations": 40, "ports": 120, "level2Ports": 100, "dcfcPorts": 20, "evStock": 600, "evsPerCharger": 5.0 }
+  ]
+}
