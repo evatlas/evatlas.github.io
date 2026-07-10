@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+:root {
+  /* Palette carried over from the original CurrentShift design */
+  --navy: #051c2c;
+  --blue: #0065a4;
+  --blue-bright: #0085d1;
+  --light-blue: #e0f0ff;
+}
+
+body {
+  background: var(--navy);
+  color: var(--light-blue);
+}
