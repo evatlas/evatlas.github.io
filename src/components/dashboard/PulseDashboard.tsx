@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import NationalPulseSection1 from "./NationalPulseSection1";
 import NationalPulseSection2 from "./NationalPulseSection2";
@@ -9,7 +9,7 @@ import GlobalSalesTrend from "./GlobalSalesTrend";
 import CountryComparison from "./CountryComparison";
 
 const TABS = [
-  { id: "canadian", label: "Canadian Pulse" },
+  { id: "canadian", label: "Canada EV Pulse" },
   { id: "global", label: "Global Atlas" },
 ] as const;
 
@@ -17,6 +17,16 @@ type TabId = (typeof TABS)[number]["id"];
 
 export default function PulseDashboard() {
   const [active, setActive] = useState<TabId>("canadian");
+
+  // Deep link: /pulse#global opens the Global Atlas tab
+  useEffect(() => {
+    if (window.location.hash === "#global") setActive("global");
+  }, []);
+
+  const selectTab = (id: TabId) => {
+    setActive(id);
+    window.history.replaceState(null, "", id === "global" ? "#global" : "#");
+  };
 
   return (
     <div>
@@ -33,7 +43,7 @@ export default function PulseDashboard() {
             {TABS.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActive(tab.id)}
+                onClick={() => selectTab(tab.id)}
                 className={`rounded-full px-5 py-1.5 text-sm font-medium transition-colors ${
                   active === tab.id
                     ? "bg-navy text-white"

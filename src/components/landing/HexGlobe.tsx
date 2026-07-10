@@ -8,30 +8,16 @@ interface Tile {
   x: number;
   y: number;
   z: number;
-  phase: number; // per-tile phase for the idle "breathing" motion
+  phase: number; // per-tile phase for idle drift / shimmer
 }
 
-// Deep navy → bright blue ramp for land tiles, indexed by lighting
+// Steel-blue → bright cyan ramp for land tiles on the dark hero
 const RAMP: [number, number, number][] = [
-  [5, 28, 44], // #051c2c
-  [0, 101, 164], // #0065a4
-  [0, 133, 209], // #0085d1
-  [127, 200, 245], // highlight
+  [35, 85, 125],
+  [70, 140, 195],
+  [120, 190, 240],
+  [195, 232, 255],
 ];
-
-function rampColor(t: number): [number, number, number] {
-  const clamped = Math.max(0, Math.min(1, t));
-  const pos = clamped * (RAMP.length - 1);
-  const i = Math.min(RAMP.length - 2, Math.floor(pos));
-  const f = pos - i;
-  const a = RAMP[i];
-  const b = RAMP[i + 1];
-  return [
-    a[0] + (b[0] - a[0]) * f,
-    a[1] + (b[1] - a[1]) * f,
-    a[2] + (b[2] - a[2]) * f,
-  ];
-}
 
 function unpack(flat: number[], scale: number): Tile[] {
   const tiles: Tile[] = [];
@@ -46,13 +32,11 @@ function unpack(flat: number[], scale: number): Tile[] {
   return tiles;
 }
 
-const TILT = -0.35; // resting axial tilt, radians
-const AUTO_SPEED = 0.07; // auto-rotation, radians per second
+const TILT = -0.3; // resting axial tilt, radians
+const AUTO_SPEED = 0.045; // auto-rotation, radians per second
 const MOUSE_RADIUS = 100; // px — hover influence radius
 const MOUSE_PUSH = 8; // px — max tile displacement away from cursor
-const DRAG_YAW = 0.005; // radians per px dragged horizontally
-const DRAG_PITCH = 0.004; // radians per px dragged vertically
-const MAX_PITCH = 0.7;
+const DRAG_RATE = 0.004; // radians per px dragged (both axes, unclamped)
 
 export default function HexGlobe() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -61,9 +45,10 @@ export default function HexGlobe() {
     active: false,
     lastX: 0,
     lastY: 0,
-    yaw: 0,
+    yaw: 0.5,
     pitch: 0,
-    vyaw: 0, // inertia after release
+    vyaw: 0,
+    vpitch: 0,
   });
   const animRef = useRef<number>(0);
   const sizeRef = useRef({ w: 0, h: 0 });
@@ -75,7 +60,32 @@ export default function HexGlobe() {
     if (!ctx) return;
 
     const landTiles = unpack(tileData.land, tileData.scale);
-    const oceanTiles = unpack(tileData.ocean, tileData.scale);
+    const meshNodes = unpack(tileData.ocean, tileData.scale);
+
+    // Mesh edges: connect each ocean node to its 2 nearest neighbours.
+    // Computed once — nodes never move on the sphere.
+    const edges: [number, number, number][] = [];
+    const seen = new Set<string>();
+    for (let a = 0; a < meshNodes.length; a++) {
+      const near: [number, number][] = [];
+      for (let b = 0; b < meshNodes.length; b++) {
+        if (a === b) continue;
+        const dx = meshNodes[a].x - meshNodes[b].x;
+        const dy = meshNodes[a].y - meshNodes[b].y;
+        const dz = meshNodes[a].z - meshNodes[b].z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < 0.14) near.push([d2, b]);
+      }
+      near.sort((u, v) => u[0] - v[0]);
+      for (let k = 0; k < Math.min(3, near.length); k++) {
+        const b = near[k][1];
+        const key = Math.min(a, b) + "_" + Math.max(a, b);
+        if (!seen.has(key)) {
+          seen.add(key);
+          edges.push([a, b, (a * 2.7 + b) % 6.283]);
+        }
+      }
+    }
 
     const reducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)"
@@ -109,6 +119,7 @@ export default function HexGlobe() {
       drag.lastX = p.x;
       drag.lastY = p.y;
       drag.vyaw = 0;
+      drag.vpitch = 0;
       canvas.setPointerCapture(e.pointerId);
       canvas.style.cursor = "grabbing";
     };
@@ -119,12 +130,11 @@ export default function HexGlobe() {
       if (!drag.active) return;
       const dx = p.x - drag.lastX;
       const dy = p.y - drag.lastY;
-      drag.yaw += dx * DRAG_YAW;
-      drag.pitch = Math.max(
-        -MAX_PITCH,
-        Math.min(MAX_PITCH, drag.pitch + dy * DRAG_PITCH)
-      );
-      drag.vyaw = dx * DRAG_YAW;
+      // Free rotation — no clamps on either axis
+      drag.yaw -= dx * DRAG_RATE;
+      drag.pitch += dy * DRAG_RATE;
+      drag.vyaw = -dx * DRAG_RATE;
+      drag.vpitch = dy * DRAG_RATE;
       drag.lastX = p.x;
       drag.lastY = p.y;
     };
@@ -147,19 +157,6 @@ export default function HexGlobe() {
     const start = performance.now();
     let prev = start;
 
-    function drawHex(cx: number, cy: number, radius: number) {
-      ctx!.beginPath();
-      for (let k = 0; k < 6; k++) {
-        const a = (k * Math.PI) / 3;
-        const px = cx + Math.cos(a) * radius;
-        const py = cy + Math.sin(a) * radius;
-        if (k === 0) ctx!.moveTo(px, py);
-        else ctx!.lineTo(px, py);
-      }
-      ctx!.closePath();
-      ctx!.fill();
-    }
-
     function animate(now: number) {
       const { w, h } = sizeRef.current;
       if (w === 0) {
@@ -172,10 +169,11 @@ export default function HexGlobe() {
 
       const drag = dragRef.current;
       if (!drag.active) {
-        if (!reducedMotion) drag.yaw += AUTO_SPEED * dt;
-        // Inertia from the last drag, decaying
+        if (!reducedMotion) drag.yaw -= AUTO_SPEED * dt;
         drag.yaw += drag.vyaw;
+        drag.pitch += drag.vpitch;
         drag.vyaw *= 0.94;
+        drag.vpitch *= 0.94;
       }
 
       const cosY = Math.cos(drag.yaw);
@@ -185,89 +183,151 @@ export default function HexGlobe() {
       const sinT = Math.sin(phi);
 
       const cx = w / 2;
-      const cy = h / 2;
-      const R = Math.min(w, h) * 0.46;
-      const landBase = R * 0.011;
-      const oceanBase = R * 0.009;
+      const cy = h * 0.52;
+      const R = Math.min(w * 0.47, h * 0.75);
+      const base = R * 0.0066; // sized for the ~34k-sample tile density
       const fadeIn = reducedMotion ? 1 : Math.min(1, t / 1.2);
       const mouse = mouseRef.current;
       const hoverActive = !drag.active;
 
       ctx!.clearRect(0, 0, w, h);
 
-      // Water-tinted backdrop disc so oceans read as sea, not blank page
-      const grad = ctx!.createRadialGradient(
+      // Soft dark disc behind the tiles — sphere volume, no outline
+      const disc = ctx!.createRadialGradient(
         cx - R * 0.3,
         cy - R * 0.3,
         R * 0.1,
         cx,
         cy,
-        R
+        R * 1.02
       );
-      grad.addColorStop(0, "rgba(228, 242, 252, 0.98)");
-      grad.addColorStop(0.72, "rgba(191, 223, 243, 0.9)");
-      grad.addColorStop(1, "rgba(137, 189, 224, 0.75)");
-      ctx!.fillStyle = grad;
+      disc.addColorStop(0, `rgba(14, 48, 76, ${0.85 * fadeIn})`);
+      disc.addColorStop(0.7, `rgba(10, 38, 62, ${0.5 * fadeIn})`);
+      disc.addColorStop(1, "rgba(10, 38, 62, 0)");
+      ctx!.fillStyle = disc;
       ctx!.beginPath();
-      ctx!.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx!.arc(cx, cy, R * 1.02, 0, Math.PI * 2);
       ctx!.fill();
 
-      ctx!.strokeStyle = "rgba(0, 101, 164, 0.25)";
-      ctx!.lineWidth = 1;
-      ctx!.beginPath();
-      ctx!.arc(cx, cy, R, 0, Math.PI * 2);
-      ctx!.stroke();
-
-      // Two passes: faint ocean texture first, land tiles on top
-      for (let pass = 0; pass < 2; pass++) {
-        const tiles = pass === 0 ? oceanTiles : landTiles;
-        const base = pass === 0 ? oceanBase : landBase;
-        for (const tile of tiles) {
-          const rx = tile.x * cosY + tile.z * sinY;
-          const rz0 = -tile.x * sinY + tile.z * cosY;
-          const ry = tile.y * cosT - rz0 * sinT;
-          const rz = tile.y * sinT + rz0 * cosT;
-
-          if (rz < 0.02) continue; // back hemisphere
-
-          let sx = cx + rx * R;
-          let sy = cy - ry * R;
-
-          if (!reducedMotion) {
-            sx += Math.sin(t * 1.3 + tile.phase) * 0.6;
-            sy += Math.cos(t * 1.1 + tile.phase * 1.7) * 0.6;
-          }
-
-          let light = 0.25 + 0.55 * rz + 0.2 * Math.max(0, (-rx + ry) * 0.7);
-          let sizeBoost = 1;
-          if (hoverActive) {
-            const dx = sx - mouse.x;
-            const dy = sy - mouse.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < MOUSE_RADIUS && dist > 0.001) {
-              const f = 1 - dist / MOUSE_RADIUS;
-              const push = f * f * MOUSE_PUSH;
-              sx += (dx / dist) * push;
-              sy += (dy / dist) * push;
-              light += f * 0.45;
-              sizeBoost = 1 + f * 0.35;
-            }
-          }
-
-          const edgeFade = Math.min(1, rz * 8);
-          if (pass === 0) {
-            ctx!.fillStyle = `rgba(0, 101, 164, ${
-              (0.1 + 0.1 * rz + (light > 0.75 ? 0.2 : 0)) * edgeFade * fadeIn
-            })`;
-          } else {
-            const [cr, cg, cb] = rampColor(light);
-            ctx!.fillStyle = `rgba(${cr | 0}, ${cg | 0}, ${cb | 0}, ${
-              (0.6 + 0.4 * rz) * edgeFade * fadeIn
-            })`;
-          }
-          drawHex(sx, sy, base * (0.55 + 0.6 * rz) * sizeBoost);
-        }
+      // Ocean mesh — project nodes once, then draw edges + nodes
+      const px: number[] = [];
+      const py: number[] = [];
+      const pz: number[] = [];
+      for (let i = 0; i < meshNodes.length; i++) {
+        const nd = meshNodes[i];
+        const rx = nd.x * cosY + nd.z * sinY;
+        const rz0 = -nd.x * sinY + nd.z * cosY;
+        const ry = nd.y * cosT - rz0 * sinT;
+        const rz = nd.y * sinT + rz0 * cosT;
+        px.push(cx - rx * R);
+        py.push(cy - ry * R);
+        pz.push(rz);
       }
+      ctx!.lineWidth = 0.7;
+      for (let i = 0; i < edges.length; i++) {
+        const [a, b, ph] = edges[i];
+        if (pz[a] < 0.04 || pz[b] < 0.04) continue;
+        const shimmer = reducedMotion
+          ? 0.5
+          : 0.5 + 0.5 * Math.sin(t * 1.3 + ph);
+        const alpha =
+          (0.03 + 0.07 * Math.min(pz[a], pz[b]) + 0.05 * shimmer) * fadeIn;
+        ctx!.strokeStyle = `rgba(96, 196, 255, ${alpha})`;
+        ctx!.beginPath();
+        ctx!.moveTo(px[a], py[a]);
+        ctx!.lineTo(px[b], py[b]);
+        ctx!.stroke();
+      }
+      for (let i = 0; i < meshNodes.length; i++) {
+        if (pz[i] < 0.04) continue;
+        const pulse = reducedMotion
+          ? 0.5
+          : 0.5 + 0.5 * Math.sin(t * 1.6 + meshNodes[i].phase);
+        ctx!.fillStyle = `rgba(140, 210, 255, ${
+          (0.12 + 0.22 * pz[i] + 0.12 * pulse) * fadeIn
+        })`;
+        ctx!.beginPath();
+        ctx!.arc(px[i], py[i], 0.6 + 0.7 * pz[i], 0, Math.PI * 2);
+        ctx!.fill();
+      }
+
+      // Land tiles
+      for (const tile of landTiles) {
+        const rx = tile.x * cosY + tile.z * sinY;
+        const rz0 = -tile.x * sinY + tile.z * cosY;
+        const ry = tile.y * cosT - rz0 * sinT;
+        const rz = tile.y * sinT + rz0 * cosT;
+
+        if (rz < 0.02) continue; // back hemisphere
+
+        let sx = cx - rx * R;
+        let sy = cy - ry * R;
+        if (sy < -12 || sy > h + 12) continue;
+
+        if (!reducedMotion) {
+          sx += Math.sin(t * 1.2 + tile.phase) * 0.5;
+          sy += Math.cos(t * 1.05 + tile.phase * 1.7) * 0.5;
+        }
+
+        let light = 0.25 + 0.55 * rz + 0.12 * Math.max(0, (rx + ry) * 0.7);
+        let sizeBoost = 1;
+        if (hoverActive) {
+          const dx = sx - mouse.x;
+          const dy = sy - mouse.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < MOUSE_RADIUS && dist > 0.001) {
+            const f = 1 - dist / MOUSE_RADIUS;
+            const push = f * f * MOUSE_PUSH;
+            sx += (dx / dist) * push;
+            sy += (dy / dist) * push;
+            // Quadratic falloff — subtle glow that dies off toward the rim
+            light += f * f * 0.3;
+            sizeBoost = 1 + f * f * 0.35;
+          }
+        }
+
+        const pos = Math.max(0, Math.min(1, light)) * (RAMP.length - 1);
+        const ci = Math.min(RAMP.length - 2, Math.floor(pos));
+        const cf = pos - ci;
+        const A = RAMP[ci];
+        const B = RAMP[ci + 1];
+        const cr = A[0] + (B[0] - A[0]) * cf;
+        const cg = A[1] + (B[1] - A[1]) * cf;
+        const cb = A[2] + (B[2] - A[2]) * cf;
+
+        const edgeFade = Math.min(1, rz * 8);
+        // Continuous highlight ramp (a hard >0.8 step used to cut a visible band)
+        const highlight = 0.25 * Math.min(1, Math.max(0, (light - 0.7) / 0.3));
+        ctx!.fillStyle = `rgba(${cr | 0}, ${cg | 0}, ${cb | 0}, ${
+          (0.32 + 0.3 * rz + highlight) * edgeFade * fadeIn
+        })`;
+
+        const rad = base * (0.55 + 0.6 * rz) * sizeBoost;
+        ctx!.beginPath();
+        for (let k = 0; k < 6; k++) {
+          const a = (k * Math.PI) / 3;
+          const hx = sx + Math.cos(a) * rad;
+          const hy = sy + Math.sin(a) * rad;
+          if (k === 0) ctx!.moveTo(hx, hy);
+          else ctx!.lineTo(hx, hy);
+        }
+        ctx!.closePath();
+        ctx!.fill();
+      }
+
+      // Readability vignette behind the centered headline
+      const vig = ctx!.createRadialGradient(
+        cx,
+        h * 0.46,
+        30,
+        cx,
+        h * 0.46,
+        Math.min(w, h) * 0.55
+      );
+      vig.addColorStop(0, "rgba(4, 18, 32, 0.66)");
+      vig.addColorStop(1, "rgba(4, 18, 32, 0)");
+      ctx!.fillStyle = vig;
+      ctx!.fillRect(0, 0, w, h);
 
       animRef.current = requestAnimationFrame(animate);
     }

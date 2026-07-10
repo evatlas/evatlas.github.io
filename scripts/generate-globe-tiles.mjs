@@ -1,4 +1,4 @@
-// Precomputes the HexGlobe tile positions so the browser never runs
+﻿// Precomputes the HexGlobe tile positions so the browser never runs
 // point-in-polygon tests. Run manually when tuning density:
 //   node scripts/generate-globe-tiles.mjs
 // Writes src/data/globe-tiles.json: unit vectors scaled by 1000,
@@ -7,8 +7,8 @@ import { readFile, writeFile, mkdir } from "fs/promises";
 import { geoContains } from "d3-geo";
 import { feature } from "topojson-client";
 
-const POINT_COUNT = 13000;
-const OCEAN_KEEP_EVERY = 3;
+const POINT_COUNT = 34000;
+const OCEAN_KEEP_EVERY = 80; // sparse ocean points for the mesh layer
 
 const topo = JSON.parse(
   await readFile("node_modules/world-atlas/land-50m.json", "utf8")
@@ -43,3 +43,5 @@ console.log(
   `land tiles: ${landPts.length / 3}, ocean tiles: ${oceanPts.length / 3}, ` +
     `bytes: ${JSON.stringify(out).length}`
 );
+
+
