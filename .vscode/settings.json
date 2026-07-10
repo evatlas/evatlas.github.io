@@ -1,0 +1,6 @@
+{
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.patterns": {
+    "package.json": "package-lock.json, next.config.ts, tsconfig.json, postcss.config.mjs, eslint.config.mjs, next-env.d.ts, .gitignore"
+  }
+}

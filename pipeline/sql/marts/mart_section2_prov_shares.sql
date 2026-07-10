@@ -1,0 +1,5 @@
+-- Mart: provincial EV sales + share by quarter/year (feeds the province
+-- map, ranked bars, and time slider). Replaces the section2_*.csv files.
+-- More marts will be added here as each chart is taken over.
+--
+-- TODO

@@ -21,3 +21,12 @@ next-env.d.ts
 
 # claude code local settings (machine-specific)
 .claude/settings.local.json
+
+# pipeline: raw downloads and the local database are rebuilt, not committed
+pipeline/data/raw/*
+!pipeline/data/raw/.gitkeep
+*.duckdb
+
+# python
+__pycache__/
+.ipynb_checkpoints/

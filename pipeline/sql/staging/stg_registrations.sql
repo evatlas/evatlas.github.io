@@ -1,0 +1,6 @@
+-- Staging view over raw 20-10-0025-01 (quarterly registrations):
+-- select the useful columns, rename to snake_case, cast types,
+-- handle suppressed values (Alberta and Newfoundland report NaN
+-- in some quarters).
+--
+-- TODO(session 2): my first SQL.

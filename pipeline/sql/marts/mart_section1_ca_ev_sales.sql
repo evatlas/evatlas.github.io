@@ -1,0 +1,7 @@
+-- Mart: national EV sales trend (quarterly BEV/PHEV counts + share of
+-- all new registrations). Replaces public/data/section1_ca_ev_sales.csv.
+--
+-- Share math rule: SUM the counts first, THEN divide — never average
+-- pre-computed shares.
+--
+-- TODO
