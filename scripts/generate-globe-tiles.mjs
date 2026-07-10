@@ -7,8 +7,8 @@ import { readFile, writeFile, mkdir } from "fs/promises";
 import { geoContains } from "d3-geo";
 import { feature } from "topojson-client";
 
-const POINT_COUNT = 22000;
-const OCEAN_KEEP_EVERY = 0; // 0 = no ocean tiles
+const POINT_COUNT = 13000;
+const OCEAN_KEEP_EVERY = 3;
 
 const topo = JSON.parse(
   await readFile("node_modules/world-atlas/land-50m.json", "utf8")
@@ -31,7 +31,7 @@ for (let i = 0; i < POINT_COUNT; i++) {
   const p = [Math.round(x * 1000), Math.round(y * 1000), Math.round(z * 1000)];
   if (geoContains(land, [lon, lat])) {
     landPts.push(...p);
-  } else if (OCEAN_KEEP_EVERY > 0 && oceanSeen++ % OCEAN_KEEP_EVERY === 0) {
+  } else if (oceanSeen++ % OCEAN_KEEP_EVERY === 0) {
     oceanPts.push(...p);
   }
 }
