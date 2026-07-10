@@ -1,10 +1,7 @@
 "use client";
 
 import { useRef, useEffect } from "react";
-import { geoContains } from "d3";
-import { feature } from "topojson-client";
-import type { Topology, GeometryCollection } from "topojson-specification";
-import type { FeatureCollection, Geometry } from "geojson";
+import tileData from "@/data/globe-tiles.json";
 
 interface Tile {
   // Unit vector on the sphere (fixed; rotation happens at projection time)
@@ -12,10 +9,9 @@ interface Tile {
   y: number;
   z: number;
   phase: number; // per-tile phase for the idle "breathing" motion
-  spin: number; // per-tile hexagon orientation
 }
 
-// Deep navy → bright blue ramp, indexed by lighting
+// Deep navy → bright blue ramp for land tiles, indexed by lighting
 const RAMP: [number, number, number][] = [
   [5, 28, 44], // #051c2c
   [0, 101, 164], // #0065a4
@@ -37,16 +33,38 @@ function rampColor(t: number): [number, number, number] {
   ];
 }
 
-const POINT_COUNT = 5200; // fibonacci samples on the full sphere (~28% land)
-const TILT = -0.35; // axial tilt, radians
-const ROTATE_SPEED = 0.09; // radians per second
-const MOUSE_RADIUS = 110; // px — cursor influence radius
-const MOUSE_PUSH = 9; // px — max tile displacement away from cursor
+function unpack(flat: number[], scale: number): Tile[] {
+  const tiles: Tile[] = [];
+  for (let i = 0; i < flat.length; i += 3) {
+    tiles.push({
+      x: flat[i] / scale,
+      y: flat[i + 1] / scale,
+      z: flat[i + 2] / scale,
+      phase: (i * 0.206) % (Math.PI * 2),
+    });
+  }
+  return tiles;
+}
+
+const TILT = -0.35; // resting axial tilt, radians
+const AUTO_SPEED = 0.07; // auto-rotation, radians per second
+const MOUSE_RADIUS = 100; // px — hover influence radius
+const MOUSE_PUSH = 8; // px — max tile displacement away from cursor
+const DRAG_YAW = 0.005; // radians per px dragged horizontally
+const DRAG_PITCH = 0.004; // radians per px dragged vertically
+const MAX_PITCH = 0.7;
 
 export default function HexGlobe() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const tilesRef = useRef<Tile[]>([]);
   const mouseRef = useRef({ x: -9999, y: -9999 });
+  const dragRef = useRef({
+    active: false,
+    lastX: 0,
+    lastY: 0,
+    yaw: 0,
+    pitch: 0,
+    vyaw: 0, // inertia after release
+  });
   const animRef = useRef<number>(0);
   const sizeRef = useRef({ w: 0, h: 0 });
 
@@ -55,6 +73,9 @@ export default function HexGlobe() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+
+    const landTiles = unpack(tileData.land, tileData.scale);
+    const oceanTiles = unpack(tileData.ocean, tileData.scale);
 
     const reducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)"
@@ -76,61 +97,60 @@ export default function HexGlobe() {
     const ro = new ResizeObserver(resize);
     ro.observe(canvas.parentElement!);
 
-    const onMouseMove = (e: MouseEvent) => {
+    const toLocal = (e: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
-      mouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
     };
-    const onMouseLeave = () => {
+
+    const onPointerDown = (e: PointerEvent) => {
+      const drag = dragRef.current;
+      const p = toLocal(e);
+      drag.active = true;
+      drag.lastX = p.x;
+      drag.lastY = p.y;
+      drag.vyaw = 0;
+      canvas.setPointerCapture(e.pointerId);
+      canvas.style.cursor = "grabbing";
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      const p = toLocal(e);
+      mouseRef.current = p;
+      const drag = dragRef.current;
+      if (!drag.active) return;
+      const dx = p.x - drag.lastX;
+      const dy = p.y - drag.lastY;
+      drag.yaw += dx * DRAG_YAW;
+      drag.pitch = Math.max(
+        -MAX_PITCH,
+        Math.min(MAX_PITCH, drag.pitch + dy * DRAG_PITCH)
+      );
+      drag.vyaw = dx * DRAG_YAW;
+      drag.lastX = p.x;
+      drag.lastY = p.y;
+    };
+    const onPointerUp = () => {
+      dragRef.current.active = false;
+      canvas.style.cursor = "grab";
+    };
+    const onPointerLeave = () => {
       mouseRef.current = { x: -9999, y: -9999 };
     };
-    canvas.addEventListener("mousemove", onMouseMove);
-    canvas.addEventListener("mouseleave", onMouseLeave);
 
-    // Build land tiles once: fibonacci-sphere sampling filtered to landmass.
-    // Points are fixed on the sphere — rotation is applied at projection time,
-    // so the expensive geo test runs only at init.
-    let cancelled = false;
-    import("world-atlas/land-110m.json").then((topology) => {
-      if (cancelled) return;
-      const topo = topology as unknown as Topology<{ land: GeometryCollection }>;
-      const land = feature(topo, topo.objects.land) as unknown as FeatureCollection<Geometry>;
-
-      const tiles: Tile[] = [];
-      const golden = Math.PI * (3 - Math.sqrt(5));
-      for (let i = 0; i < POINT_COUNT; i++) {
-        const y = 1 - (i / (POINT_COUNT - 1)) * 2;
-        const r = Math.sqrt(1 - y * y);
-        const theta = golden * i;
-        const x = Math.cos(theta) * r;
-        const z = Math.sin(theta) * r;
-        const lat = (Math.asin(y) * 180) / Math.PI;
-        const lon = (Math.atan2(z, x) * 180) / Math.PI;
-        if (geoContains(land, [lon, lat])) {
-          tiles.push({
-            x,
-            y,
-            z,
-            phase: (i * 0.618) % (Math.PI * 2),
-            spin: (i * 2.4) % (Math.PI * 2),
-          });
-        }
-      }
-      tilesRef.current = tiles;
-    });
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerUp);
+    canvas.addEventListener("pointerleave", onPointerLeave);
+    canvas.style.cursor = "grab";
+    canvas.style.touchAction = "none";
 
     const start = performance.now();
-    const cosT = Math.cos(TILT);
-    const sinT = Math.sin(TILT);
+    let prev = start;
 
-    function drawHex(
-      cx: number,
-      cy: number,
-      radius: number,
-      rotation: number
-    ) {
+    function drawHex(cx: number, cy: number, radius: number) {
       ctx!.beginPath();
       for (let k = 0; k < 6; k++) {
-        const a = rotation + (k * Math.PI) / 3;
+        const a = (k * Math.PI) / 3;
         const px = cx + Math.cos(a) * radius;
         const py = cy + Math.sin(a) * radius;
         if (k === 0) ctx!.moveTo(px, py);
@@ -142,92 +162,111 @@ export default function HexGlobe() {
 
     function animate(now: number) {
       const { w, h } = sizeRef.current;
-      const tiles = tilesRef.current;
-      if (w === 0 || tiles.length === 0) {
+      if (w === 0) {
         animRef.current = requestAnimationFrame(animate);
         return;
       }
-
       const t = (now - start) / 1000;
-      const yaw = reducedMotion ? 0.6 : t * ROTATE_SPEED;
-      const cosY = Math.cos(yaw);
-      const sinY = Math.sin(yaw);
+      const dt = Math.min(0.05, (now - prev) / 1000);
+      prev = now;
+
+      const drag = dragRef.current;
+      if (!drag.active) {
+        if (!reducedMotion) drag.yaw += AUTO_SPEED * dt;
+        // Inertia from the last drag, decaying
+        drag.yaw += drag.vyaw;
+        drag.vyaw *= 0.94;
+      }
+
+      const cosY = Math.cos(drag.yaw);
+      const sinY = Math.sin(drag.yaw);
+      const phi = TILT + drag.pitch;
+      const cosT = Math.cos(phi);
+      const sinT = Math.sin(phi);
 
       const cx = w / 2;
       const cy = h / 2;
-      const R = Math.min(w, h) * 0.42;
-      const baseTile = R * 0.017;
+      const R = Math.min(w, h) * 0.46;
+      const landBase = R * 0.011;
+      const oceanBase = R * 0.009;
       const fadeIn = reducedMotion ? 1 : Math.min(1, t / 1.2);
       const mouse = mouseRef.current;
+      const hoverActive = !drag.active;
 
       ctx!.clearRect(0, 0, w, h);
 
-      // Soft backdrop disc — gives the sphere volume behind the land tiles
+      // Water-tinted backdrop disc so oceans read as sea, not blank page
       const grad = ctx!.createRadialGradient(
         cx - R * 0.3,
         cy - R * 0.3,
         R * 0.1,
         cx,
         cy,
-        R * 1.02
+        R
       );
-      grad.addColorStop(0, "rgba(224, 240, 255, 0.95)");
-      grad.addColorStop(0.7, "rgba(224, 240, 255, 0.45)");
-      grad.addColorStop(1, "rgba(224, 240, 255, 0)");
+      grad.addColorStop(0, "rgba(228, 242, 252, 0.98)");
+      grad.addColorStop(0.72, "rgba(191, 223, 243, 0.9)");
+      grad.addColorStop(1, "rgba(137, 189, 224, 0.75)");
       ctx!.fillStyle = grad;
       ctx!.beginPath();
-      ctx!.arc(cx, cy, R * 1.02, 0, Math.PI * 2);
+      ctx!.arc(cx, cy, R, 0, Math.PI * 2);
       ctx!.fill();
 
-      ctx!.strokeStyle = "rgba(0, 101, 164, 0.12)";
+      ctx!.strokeStyle = "rgba(0, 101, 164, 0.25)";
       ctx!.lineWidth = 1;
       ctx!.beginPath();
       ctx!.arc(cx, cy, R, 0, Math.PI * 2);
       ctx!.stroke();
 
-      for (const tile of tiles) {
-        // Yaw (spin around the poles), then axial tilt toward the viewer
-        const rx = tile.x * cosY + tile.z * sinY;
-        const rz0 = -tile.x * sinY + tile.z * cosY;
-        const ry = tile.y * cosT - rz0 * sinT;
-        const rz = tile.y * sinT + rz0 * cosT;
+      // Two passes: faint ocean texture first, land tiles on top
+      for (let pass = 0; pass < 2; pass++) {
+        const tiles = pass === 0 ? oceanTiles : landTiles;
+        const base = pass === 0 ? oceanBase : landBase;
+        for (const tile of tiles) {
+          const rx = tile.x * cosY + tile.z * sinY;
+          const rz0 = -tile.x * sinY + tile.z * cosY;
+          const ry = tile.y * cosT - rz0 * sinT;
+          const rz = tile.y * sinT + rz0 * cosT;
 
-        if (rz < 0.02) continue; // back hemisphere
+          if (rz < 0.02) continue; // back hemisphere
 
-        let sx = cx + rx * R;
-        let sy = cy - ry * R;
+          let sx = cx + rx * R;
+          let sy = cy - ry * R;
 
-        // Idle breathing: each tile drifts slightly in place
-        if (!reducedMotion) {
-          sx += Math.sin(t * 1.3 + tile.phase) * 0.7;
-          sy += Math.cos(t * 1.1 + tile.phase * 1.7) * 0.7;
+          if (!reducedMotion) {
+            sx += Math.sin(t * 1.3 + tile.phase) * 0.6;
+            sy += Math.cos(t * 1.1 + tile.phase * 1.7) * 0.6;
+          }
+
+          let light = 0.25 + 0.55 * rz + 0.2 * Math.max(0, (-rx + ry) * 0.7);
+          let sizeBoost = 1;
+          if (hoverActive) {
+            const dx = sx - mouse.x;
+            const dy = sy - mouse.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < MOUSE_RADIUS && dist > 0.001) {
+              const f = 1 - dist / MOUSE_RADIUS;
+              const push = f * f * MOUSE_PUSH;
+              sx += (dx / dist) * push;
+              sy += (dy / dist) * push;
+              light += f * 0.45;
+              sizeBoost = 1 + f * 0.35;
+            }
+          }
+
+          const edgeFade = Math.min(1, rz * 8);
+          if (pass === 0) {
+            ctx!.fillStyle = `rgba(0, 101, 164, ${
+              (0.1 + 0.1 * rz + (light > 0.75 ? 0.2 : 0)) * edgeFade * fadeIn
+            })`;
+          } else {
+            const [cr, cg, cb] = rampColor(light);
+            ctx!.fillStyle = `rgba(${cr | 0}, ${cg | 0}, ${cb | 0}, ${
+              (0.6 + 0.4 * rz) * edgeFade * fadeIn
+            })`;
+          }
+          drawHex(sx, sy, base * (0.55 + 0.6 * rz) * sizeBoost);
         }
-
-        // Lighting: front-facing depth plus an upper-left key light
-        let light = 0.25 + 0.55 * rz + 0.2 * Math.max(0, (-rx + ry) * 0.7);
-
-        // Cursor interaction: repel + brighten
-        let sizeBoost = 1;
-        const dx = sx - mouse.x;
-        const dy = sy - mouse.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < MOUSE_RADIUS && dist > 0.001) {
-          const f = 1 - dist / MOUSE_RADIUS;
-          const push = f * f * MOUSE_PUSH;
-          sx += (dx / dist) * push;
-          sy += (dy / dist) * push;
-          light += f * 0.45;
-          sizeBoost = 1 + f * 0.35;
-        }
-
-        const [cr, cg, cb] = rampColor(light);
-        const edgeFade = Math.min(1, rz * 8); // fade near the silhouette
-        ctx!.fillStyle = `rgba(${cr | 0}, ${cg | 0}, ${cb | 0}, ${
-          (0.55 + 0.45 * rz) * edgeFade * fadeIn
-        })`;
-
-        const radius = baseTile * (0.55 + 0.6 * rz) * sizeBoost;
-        drawHex(sx, sy, radius, tile.spin);
       }
 
       animRef.current = requestAnimationFrame(animate);
@@ -236,10 +275,12 @@ export default function HexGlobe() {
     animRef.current = requestAnimationFrame(animate);
 
     return () => {
-      cancelled = true;
       cancelAnimationFrame(animRef.current);
-      canvas.removeEventListener("mousemove", onMouseMove);
-      canvas.removeEventListener("mouseleave", onMouseLeave);
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerUp);
+      canvas.removeEventListener("pointerleave", onPointerLeave);
       ro.disconnect();
     };
   }, []);
