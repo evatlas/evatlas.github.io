@@ -51,11 +51,11 @@ Pattern: **ELT** — Python extracts and loads raw data, SQL (DuckDB) transforms
 | StatCan WDS API | 20-10-0025-01 — quarterly new registrations, BEV/PHEV split (2017+) | Section 1 trend, Section 2 provinces |
 | StatCan WDS API | 20-10-0085-01 — monthly new sales, ZEV combined (2024+) | Section 1 recent months |
 | StatCan WDS API | 23-10-0308-01 — annual vehicle stock, light-duty | Section 1 stock share |
-| NREL API | EV charging stations (Canada) | Section 3 charger analysis |
+| NLR API (formerly NREL; domain moved to developer.nlr.gov May 2026) | EV charging stations (Canada) | Section 3 charger analysis |
 
 ## Status
 
-- [ ] Stage 1 — fetch scripts
+- [x] Stage 1 — fetch (notebooks in `fetch/`; raw zips + chargers JSON in `data/raw/`)
 - [ ] Stage 2 — staging views
 - [ ] Stage 3 — marts
 - [ ] Stage 4 — exports replacing placeholders
